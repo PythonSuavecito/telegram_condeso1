@@ -11,7 +11,7 @@ from flask import Flask
 
 # ================= CONFIGURACIÓN =================
 GRUPO, GUIA, BONO, MONTO, ASISTENTES = range(5)
-CORREGIR_BONO, NUEVO_BONO = range(5, 7)
+CORREGIR_BONO, NUEVO_BONO, ELIMINAR_BONO = range(5, 8)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -106,6 +106,22 @@ class Database:
         conn.close()
         return bonos
     
+    def obtener_registro_por_id(self, registro_id):
+        """Obtiene un registro específico por ID"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, grupo, guia, bono, monto, asistentes, fecha_creacion 
+            FROM registros 
+            WHERE id = ?
+        ''', (registro_id,))
+        
+        registro = cursor.fetchone()
+        conn.close()
+        
+        return registro
+    
     def actualizar_bono(self, registro_id, nuevo_bono):
         """Actualiza el tipo de bono de un registro"""
         conn = sqlite3.connect(self.db_name)
@@ -122,6 +138,32 @@ class Database:
         conn.close()
         
         return filas_afectadas > 0
+    
+    def eliminar_registro(self, registro_id):
+        """Elimina un registro por ID"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM registros WHERE id = ?', (registro_id,))
+        
+        conn.commit()
+        filas_afectadas = cursor.rowcount
+        conn.close()
+        
+        return filas_afectadas > 0
+    
+    def eliminar_registros_por_bono(self, bono):
+        """Elimina todos los registros de un tipo de bono"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM registros WHERE bono = ?', (bono,))
+        
+        conn.commit()
+        filas_afectadas = cursor.rowcount
+        conn.close()
+        
+        return filas_afectadas
     
     def obtener_estadisticas(self):
         """Obtiene estadísticas de los registros"""
@@ -181,7 +223,7 @@ def home():
         <body>
             <h1>🤖 Bot del Congreso 2026</h1>
             <div class="card">
-                <p class="success">✅ Sistema con Corrección de Bonos</p>
+                <p class="success">✅ Sistema con Corrección y Eliminación de Bonos</p>
                 <p><strong>Total registros:</strong> {stats['total_registros']}</p>
                 <p><strong>Total asistentes:</strong> {stats['total_asistentes']}</p>
                 <p><strong>Tipos de bono:</strong> {len(db.obtener_tipos_bono())}</p>
@@ -248,7 +290,212 @@ async def capturar_asistentes(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text('❌ Error al guardar el registro')
         return ConversationHandler.END
 
-# ================= SISTEMA DE CORRECCIÓN DE BONOS =================
+# ================= SISTEMA DE ELIMINACIÓN DE BONOS =================
+async def eliminar_bono(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra los tipos de bono disponibles para eliminar"""
+    bonos = db.obtener_tipos_bono()
+    
+    if not bonos:
+        await update.message.reply_text('📭 No hay registros con tipos de bono para eliminar')
+        return
+    
+    # Crear teclado inline con los bonos
+    keyboard = []
+    for bono in bonos:
+        keyboard.append([InlineKeyboardButton(f"🗑️ {bono}", callback_data=f"eliminar_{bono}")])
+    
+    keyboard.append([InlineKeyboardButton("🔍 Buscar por ID", callback_data="buscar_id")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_eliminacion")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        '🗑️ **ELIMINACIÓN DE BONOS**\n\n'
+        'Selecciona el tipo de bono que quieres eliminar:\n\n'
+        '⚠️ **ADVERTENCIA:** Esto eliminará TODOS los registros del bono seleccionado.',
+        reply_markup=reply_markup
+    )
+
+async def handle_eliminar_bono(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja la selección de bono a eliminar"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "cancelar_eliminacion":
+        await query.edit_message_text('❌ Eliminación cancelada')
+        return
+    
+    if query.data == "buscar_id":
+        await query.edit_message_text(
+            '🔍 **BUSCAR REGISTRO POR ID**\n\n'
+            'Por favor, ingresa el **ID del registro** que quieres eliminar:'
+        )
+        return ELIMINAR_BONO
+    
+    if query.data.startswith("eliminar_"):
+        bono_a_eliminar = query.data.replace("eliminar_", "")
+        context.user_data['bono_a_eliminar'] = bono_a_eliminar
+        
+        # Mostrar registros con este bono
+        registros = db.obtener_registros_por_bono(bono_a_eliminar)
+        
+        if not registros:
+            await query.edit_message_text(f'❌ No hay registros con bono: {bono_a_eliminar}')
+            return
+        
+        mensaje = f'⚠️ **ELIMINAR TODOS los registros de: {bono_a_eliminar}**\n\n'
+        mensaje += f'📋 **Registros encontrados:** {len(registros)}\n\n'
+        
+        # Mostrar resumen de registros
+        total_asistentes = sum(registro[5] for registro in registros)
+        total_monto = sum(float(registro[4]) for registro in registros)
+        
+        mensaje += f'• 👥 Total asistentes: {total_asistentes}\n'
+        mensaje += f'• 💰 Total monto: ${total_monto:,.2f}\n\n'
+        mensaje += '¿Estás seguro de que quieres eliminar TODOS estos registros?'
+        
+        # Botones de confirmación
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Sí, eliminar TODOS", callback_data=f"confirmar_eliminar_{bono_a_eliminar}"),
+                InlineKeyboardButton("❌ No, cancelar", callback_data="cancelar_eliminacion")
+            ],
+            [InlineKeyboardButton("🔙 Volver a bonos", callback_data="volver_eliminar_bonos")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(mensaje, reply_markup=reply_markup)
+
+async def handle_confirmar_eliminar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirma y ejecuta la eliminación de registros"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data.startswith("confirmar_eliminar_"):
+        bono_a_eliminar = query.data.replace("confirmar_eliminar_", "")
+        
+        # Ejecutar eliminación
+        registros_eliminados = db.eliminar_registros_por_bono(bono_a_eliminar)
+        
+        await query.edit_message_text(
+            f'✅ **ELIMINACIÓN COMPLETADA**\n\n'
+            f'• 🎫 Bono eliminado: `{bono_a_eliminar}`\n'
+            f'• 📊 Registros eliminados: {registros_eliminados}\n\n'
+            '🗑️ Todos los registros han sido eliminados permanentemente.'
+        )
+
+async def handle_eliminar_por_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja la eliminación por ID de registro"""
+    try:
+        registro_id_text = update.message.text.strip()
+        
+        if not registro_id_text.isdigit():
+            await update.message.reply_text('❌ Error: El ID debe ser un número. Intenta nuevamente:')
+            return ELIMINAR_BONO
+        
+        registro_id = int(registro_id_text)
+        registro = db.obtener_registro_por_id(registro_id)
+        
+        if not registro:
+            await update.message.reply_text(
+                f'❌ No se encontró ningún registro con ID: {registro_id}\n\n'
+                'Por favor, ingresa un ID válido o usa /cancel para cancelar:'
+            )
+            return ELIMINAR_BONO
+        
+        # Mostrar información del registro
+        id_reg, grupo, guia, bono, monto, asistentes, fecha = registro
+        fecha_simple = fecha.split()[0] if isinstance(fecha, str) else str(fecha)[:10]
+        
+        mensaje = f'🔍 **REGISTRO ENCONTRADO**\n\n'
+        mensaje += f'• 🆔 ID: {id_reg}\n'
+        mensaje += f'• 🏷️ Grupo: {grupo}\n'
+        mensaje += f'• 👤 Guía: {guia}\n'
+        mensaje += f'• 🎫 Bono: {bono}\n'
+        mensaje += f'• 💰 Monto: ${float(monto):,.2f}\n'
+        mensaje += f'• 👥 Asistentes: {asistentes}\n'
+        mensaje += f'• 📅 Fecha: {fecha_simple}\n\n'
+        mensaje += '¿Estás seguro de que quieres eliminar este registro?'
+        
+        # Guardar ID en contexto para confirmación
+        context.user_data['registro_a_eliminar'] = registro_id
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Sí, eliminar", callback_data="confirmar_eliminar_id"),
+                InlineKeyboardButton("❌ No, cancelar", callback_data="cancelar_eliminacion")
+            ]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(mensaje, reply_markup=reply_markup)
+        return ConversationHandler.END
+        
+    except Exception as e:
+        logger.error(f"Error en eliminación por ID: {e}")
+        await update.message.reply_text('❌ Error al buscar el registro. Intenta nuevamente:')
+        return ELIMINAR_BONO
+
+async def handle_confirmar_eliminar_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Confirma y ejecuta la eliminación por ID"""
+    query = update.callback_query
+    await query.answer()
+    
+    registro_id = context.user_data.get('registro_a_eliminar')
+    
+    if not registro_id:
+        await query.edit_message_text('❌ Error: No se encontró el registro a eliminar')
+        return
+    
+    # Obtener información del registro antes de eliminar
+    registro = db.obtener_registro_por_id(registro_id)
+    
+    if not registro:
+        await query.edit_message_text('❌ Error: El registro ya no existe')
+        return
+    
+    # Ejecutar eliminación
+    eliminado = db.eliminar_registro(registro_id)
+    
+    if eliminado:
+        id_reg, grupo, guia, bono, monto, asistentes, fecha = registro
+        await query.edit_message_text(
+            f'✅ **REGISTRO ELIMINADO**\n\n'
+            f'• 🆔 ID: {id_reg}\n'
+            f'• 🏷️ Grupo: {grupo}\n'
+            f'• 🎫 Bono: {bono}\n'
+            f'• 💰 Monto: ${float(monto):,.2f}\n\n'
+            '🗑️ El registro ha sido eliminado permanentemente.'
+        )
+    else:
+        await query.edit_message_text('❌ Error: No se pudo eliminar el registro')
+
+async def handle_volver_eliminar_bonos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Vuelve a la lista de bonos para eliminar"""
+    query = update.callback_query
+    await query.answer()
+    
+    bonos = db.obtener_tipos_bono()
+    
+    keyboard = []
+    for bono in bonos:
+        keyboard.append([InlineKeyboardButton(f"🗑️ {bono}", callback_data=f"eliminar_{bono}")])
+    
+    keyboard.append([InlineKeyboardButton("🔍 Buscar por ID", callback_data="buscar_id")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_eliminacion")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        '🗑️ **ELIMINACIÓN DE BONOS**\n\n'
+        'Selecciona el tipo de bono que quieres eliminar:\n\n'
+        '⚠️ **ADVERTENCIA:** Esto eliminará TODOS los registros del bono seleccionado.',
+        reply_markup=reply_markup
+    )
+
+# ================= SISTEMA DE CORRECCIÓN DE BONOS (existente) =================
 async def corregir_bono(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra los tipos de bono disponibles para corregir"""
     bonos = db.obtener_tipos_bono()
@@ -444,11 +691,12 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚀 /start - Iniciar captura de datos\n"
         "📝 /nuevo - Nuevo registro\n"
         "🔧 /corregir - Corregir tipos de bono\n"
+        "🗑️ /eliminar - Eliminar registros\n"
         "📊 /reporte - Generar CSV desde BD\n"
         "📈 /estadisticas - Ver estadísticas\n"
-        "🗑️ /limpiar - Limpiar base de datos\n"
+        "🧹 /limpiar - Limpiar base de datos\n"
         "ℹ️ /ayuda - Mostrar esta ayuda\n\n"
-        "💾 **Sistema con corrección de bonos**"
+        "💾 **Sistema con corrección y eliminación de bonos**"
     )
 
 # ================= INICIAR BOT =================
@@ -485,20 +733,36 @@ def iniciar_bot():
             fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Corrección cancelada'))]
         )
         
+        # Conversación para eliminación de bonos
+        conv_eliminacion = ConversationHandler(
+            entry_points=[CallbackQueryHandler(handle_eliminar_bono, pattern='^buscar_id$')],
+            states={
+                ELIMINAR_BONO: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_eliminar_por_id)],
+            },
+            fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Eliminación cancelada'))]
+        )
+        
         # Handlers principales
         application.add_handler(conv_principal)
         application.add_handler(conv_correccion)
+        application.add_handler(conv_eliminacion)
         application.add_handler(CommandHandler("corregir", corregir_bono))
+        application.add_handler(CommandHandler("eliminar", eliminar_bono))
         application.add_handler(CommandHandler("reporte", generar_reporte))
         application.add_handler(CommandHandler("estadisticas", ver_estadisticas))
         application.add_handler(CommandHandler("ayuda", ayuda))
         
         # Handlers para botones inline
         application.add_handler(CallbackQueryHandler(handle_corregir_bono, pattern='^corregir_'))
-        application.add_handler(CallbackQueryHandler(handle_volver_bonos, pattern='^volver_bonos'))
-        application.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.edit_message_text('❌ Corrección cancelada'), pattern='^cancelar_correccion'))
+        application.add_handler(CallbackQueryHandler(handle_eliminar_bono, pattern='^eliminar_'))
+        application.add_handler(CallbackQueryHandler(handle_confirmar_eliminar, pattern='^confirmar_eliminar_'))
+        application.add_handler(CallbackQueryHandler(handle_confirmar_eliminar_id, pattern='^confirmar_eliminar_id$'))
+        application.add_handler(CallbackQueryHandler(handle_volver_bonos, pattern='^volver_bonos$'))
+        application.add_handler(CallbackQueryHandler(handle_volver_eliminar_bonos, pattern='^volver_eliminar_bonos$'))
+        application.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.edit_message_text('❌ Corrección cancelada'), pattern='^cancelar_correccion$'))
+        application.add_handler(CallbackQueryHandler(lambda u,c: u.callback_query.edit_message_text('❌ Eliminación cancelada'), pattern='^cancelar_eliminacion$'))
         
-        print("🤖 Bot con Corrección de Bonos iniciado correctamente")
+        print("🤖 Bot con Corrección y Eliminación de Bonos iniciado correctamente")
         print("✅ Envía /start a tu bot en Telegram")
         application.run_polling()
         
@@ -510,7 +774,7 @@ def iniciar_servidor_web():
     app.run(host='0.0.0.0', port=8080)
 
 if __name__ == '__main__':
-    print("🚀 Iniciando Bot del Congreso 2026 con Corrección de Bonos...")
+    print("🚀 Iniciando Bot del Congreso 2026 con Corrección y Eliminación de Bonos...")
     
     # Iniciar bot en hilo separado
     bot_thread = threading.Thread(target=iniciar_bot)
