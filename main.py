@@ -10,6 +10,9 @@ from telegram.ext import filters
 from flask import Flask
 
 # ================= CONFIGURACIÓN =================
+# REEMPLAZA ESTO CON TU TOKEN REAL
+BOT_TOKEN = "8369659184:AAG50epfdfyaZMYocNFS6gDsCfBxBvx-e8o"  # ⚠️ PON TU TOKEN AQUÍ ⚠️
+
 GRUPO, GUIA, BONO, MONTO, ASISTENTES = range(5)
 CORREGIR_BONO, NUEVO_BONO, ELIMINAR_BONO = range(5, 8)
 
@@ -495,7 +498,7 @@ async def handle_volver_eliminar_bonos(update: Update, context: ContextTypes.DEF
         reply_markup=reply_markup
     )
 
-# ================= SISTEMA DE CORRECCIÓN DE BONOS (existente) =================
+# ================= SISTEMA DE CORRECCIÓN DE BONOS =================
 async def corregir_bono(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra los tipos de bono disponibles para corregir"""
     bonos = db.obtener_tipos_bono()
@@ -701,11 +704,11 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= INICIAR BOT =================
 def iniciar_bot():
-    token = os.environ.get('BOT_TOKEN')
+    token = BOT_TOKEN  # Usamos el token definido arriba
     
-    if not token:
-        print("❌ ERROR: BOT_TOKEN no encontrado")
-        print("💡 Configura BOT_TOKEN en Secrets (🔒)")
+    if not token or token == "TU_TOKEN_AQUI":
+        print("❌ ERROR: BOT_TOKEN no configurado")
+        print("💡 Reemplaza 'TU_TOKEN_AQUI' con tu token real de Telegram")
         return
     
     try:
