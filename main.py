@@ -3,6 +3,7 @@ import csv
 import logging
 import threading
 import sqlite3
+import asyncio
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ConversationHandler, ContextTypes, CallbackQueryHandler
@@ -11,7 +12,7 @@ from flask import Flask
 
 # ================= CONFIGURACIÓN =================
 # REEMPLAZA ESTO CON TU TOKEN REAL
-BOT_TOKEN = "8369659184:AAG50epfdfyaZMYocNFS6gDsCfBxBvx-e8o"  # ⚠️ PON TU TOKEN AQUÍ ⚠️
+BOT_TOKEN = "TU_TOKEN_AQUI"  # ⚠️ PON TU TOKEN AQUÍ ⚠️
 
 GRUPO, GUIA, BONO, MONTO, ASISTENTES = range(5)
 CORREGIR_BONO, NUEVO_BONO, ELIMINAR_BONO = range(5, 8)
@@ -704,7 +705,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= INICIAR BOT =================
 def iniciar_bot():
-    token = BOT_TOKEN  # Usamos el token definido arriba
+    token = BOT_TOKEN
     
     if not token or token == "TU_TOKEN_AQUI":
         print("❌ ERROR: BOT_TOKEN no configurado")
@@ -712,6 +713,10 @@ def iniciar_bot():
         return
     
     try:
+        # Crear un nuevo event loop para este hilo
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         application = Application.builder().token(token).build()
         
         # Conversación principal para capturar datos
@@ -724,7 +729,8 @@ def iniciar_bot():
                 MONTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, capturar_monto)],
                 ASISTENTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, capturar_asistentes)],
             },
-            fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Cancelado'))]
+            fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Cancelado'))],
+            per_message=False
         )
         
         # Conversación para corrección de bonos
@@ -733,7 +739,8 @@ def iniciar_bot():
             states={
                 NUEVO_BONO: [MessageHandler(filters.TEXT & ~filters.COMMAND, capturar_nuevo_bono)],
             },
-            fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Corrección cancelada'))]
+            fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Corrección cancelada'))],
+            per_message=False
         )
         
         # Conversación para eliminación de bonos
@@ -742,7 +749,8 @@ def iniciar_bot():
             states={
                 ELIMINAR_BONO: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_eliminar_por_id)],
             },
-            fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Eliminación cancelada'))]
+            fallbacks=[CommandHandler('cancel', lambda u,c: u.message.reply_text('❌ Eliminación cancelada'))],
+            per_message=False
         )
         
         # Handlers principales
@@ -767,6 +775,8 @@ def iniciar_bot():
         
         print("🤖 Bot con Corrección y Eliminación de Bonos iniciado correctamente")
         print("✅ Envía /start a tu bot en Telegram")
+        
+        # Ejecutar el bot en el event loop
         application.run_polling()
         
     except Exception as e:
@@ -774,7 +784,7 @@ def iniciar_bot():
 
 # ================= INICIAR TODO =================
 def iniciar_servidor_web():
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
     print("🚀 Iniciando Bot del Congreso 2026 con Corrección y Eliminación de Bonos...")
@@ -784,5 +794,5 @@ if __name__ == '__main__':
     bot_thread.daemon = True
     bot_thread.start()
     
-    # Iniciar servidor web
+    # Iniciar servidor web en el hilo principal
     iniciar_servidor_web()
