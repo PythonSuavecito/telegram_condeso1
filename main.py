@@ -12,7 +12,7 @@ from flask import Flask
 
 # ================= CONFIGURACIÓN =================
 # REEMPLAZA ESTO CON TU TOKEN REAL
-BOT_TOKEN = "TU_TOKEN_AQUI"  # ⚠️ PON TU TOKEN AQUÍ ⚠️
+BOT_TOKEN = "8369659184:AAG50epfdfyaZMYocNFS6gDsCfBxBvx-e8o"  # ⚠️ PON TU TOKEN AQUÍ ⚠️
 
 GRUPO, GUIA, BONO, MONTO, ASISTENTES = range(5)
 CORREGIR_BONO, NUEVO_BONO, ELIMINAR_BONO = range(5, 8)
